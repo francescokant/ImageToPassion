@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ImageToPassion</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lexend:wght@500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      @keyframes gradient-animation {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+      }
+      @keyframes intro-background-animation {
+        from {
+          opacity: 0;
+          transform: scale(1.2);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1.1);
+        }
+      }
+      .animated-gradient {
+        background: linear-gradient(-45deg, #100f1c, #2b264d, #1e1c2f, #4a3f76);
+        background-size: 400% 400%;
+        animation: 
+          intro-background-animation 1.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards,
+          gradient-animation 30s ease infinite 1.5s;
+        opacity: 0; /* Initial state for intro animation */
+        transition: transform 0.2s ease-out;
+      }
+      
+      @keyframes pulse-border {
+        0%, 100% { border-color: rgba(255, 255, 255, 0.15); box-shadow: 0 0 0 0 rgba(167, 139, 250, 0); }
+        50% { border-color: rgba(167, 139, 250, 0.6); box-shadow: 0 0 12px 2px rgba(167, 139, 250, 0.3); }
+      }
+      .animate-pulse-border {
+        animation: pulse-border 2.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+
+      @keyframes shine-effect {
+        to {
+          transform: translateX(100%);
+        }
+      }
+
+      .shine-wrapper {
+        position: relative;
+        overflow: hidden;
+      }
+
+      .shine-wrapper::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(
+          100deg,
+          transparent 25%,
+          rgba(255, 255, 255, 0.25) 50%,
+          transparent 75%
+        );
+        transform: translateX(-100%);
+        animation: shine-effect 1.25s cubic-bezier(0.2, 0.6, 0.4, 1) 0.4s;
+        pointer-events: none;
+      }
+
+      @keyframes fade-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+
+      .animate-fade-in {
+        animation: fade-in 0.8s ease-out forwards;
+      }
+    </style>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              display: ['Lexend', 'sans-serif'],
+            },
+            colors: {
+              'background': '#0D0C14',
+              'surface-glass': 'rgba(30, 28, 47, 0.5)',
+              'primary': '#A78BFA', // Lighter, more vibrant purple (Viloet-300)
+              'primary-hover': '#C4B5FD', // (Violet-200)
+              'text-primary': '#F5F3FF', // (Violet-50)
+              'text-secondary': '#A8A2B9', // (Neutral gray with a hint of purple)
+              'border-glass': 'rgba(255, 255, 255, 0.1)',
+              'border-focus': '#A78BFA',
+              'danger': '#F43F5E', // (Rose-500)
+            },
+            boxShadow: {
+              'aurora': '0 8px 32px 0 rgba(167, 139, 250, 0.25)',
+              'inner-soft': 'inset 0 2px 8px 0 rgba(0, 0, 0, 0.25)',
+            },
+            borderRadius: {
+               'xl': '1rem',
+               '2xl': '1.5rem',
+               '3xl': '2rem',
+            },
+            backdropBlur: {
+              '2xl': '40px',
+            }
+          }
+        }
+      }
+    </script>
+  <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.21.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.1.1/",
+    "react/": "https://aistudiocdn.com/react@^19.1.1/",
+    "react": "https://aistudiocdn.com/react@^19.1.1",
+    "qrcode": "https://aistudiocdn.com/qrcode@^1.5.4"
+  }
+}
+</script>
+</head>
+  <body class="bg-background text-text-primary font-sans antialiased">
+    <div id="background-gradient" class="fixed inset-0 z-[-1] animated-gradient"></div>
+    <div id="root"></div>
+    <script>
+      const background = document.getElementById('background-gradient');
+      if (background) {
+        document.addEventListener('mousemove', (e) => {
+          const { clientX, clientY } = e;
+          const { innerWidth, innerHeight } = window;
+          
+          const x = (clientX - innerWidth / 2) / (innerWidth / 2);
+          const y = (clientY - innerHeight / 2) / (innerHeight / 2);
+          
+          const intensity = 8; 
+          
+          const moveX = x * intensity * -1;
+          const moveY = y * intensity * -1;
+          
+          requestAnimationFrame(() => {
+            background.style.transform = `scale(1.1) translate(${moveX}px, ${moveY}px)`;
+          });
+        });
+      }
+    </script>
+  </body>
+</html>
