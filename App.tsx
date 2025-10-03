@@ -82,7 +82,7 @@ const App: React.FC = () => {
     setGeneratedImage(null); // Clear previous image to show loader
 
     try {
-        const rawImageResult = await generateFinalImage(referenceImages.map(img => img.file), scenario);
+        const rawImageResult = await generateFinalImage(referenceImages.map(img => img.file), scenario, true);
         const processedImage = await processImage(rawImageResult);
         setGeneratedImage(processedImage);
         setStep(2); // Stay on the result step

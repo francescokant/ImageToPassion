@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { LoadingSpinner, DownloadIcon, ShareIcon, ResetIcon, SparklesIcon } from './IconComponents';
 import { Button } from './Button';
 import { LOADING_MESSAGES } from '../constants';
-import { QrCodeModal } from './QrCodeModal';
 
 interface ResultDisplayProps {
   generatedImage: string | null;
@@ -35,8 +34,37 @@ const AnimatedLoadingMessage: React.FC = () => {
   );
 };
 
+const base64ToBlob = (base64: string): Blob | null => {
+  try {
+    const parts = base64.split(';base64,');
+    if (parts.length !== 2) return null;
+    
+    const contentType = parts[0].split(':')[1];
+    if (!contentType) return null;
+
+    const raw = window.atob(parts[1]);
+    const rawLength = raw.length;
+    const uInt8Array = new Uint8Array(rawLength);
+
+    for (let i = 0; i < rawLength; ++i) {
+      uInt8Array[i] = raw.charCodeAt(i);
+    }
+
+    return new Blob([uInt8Array], { type: contentType });
+  } catch (error) {
+    console.error("Failed to convert base64 to Blob", error);
+    return null;
+  }
+};
+
 export const ResultDisplay: React.FC<ResultDisplayProps> = ({ generatedImage, isLoading, fileName, onStartOver, onRegenerate, error }) => {
-  const [isQrModalOpen, setQrModalOpen] = useState(false);
+  const [isShareApiSupported, setIsShareApiSupported] = useState(false);
+
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      setIsShareApiSupported(true);
+    }
+  }, []);
 
   const handleDownload = () => {
     if (!generatedImage) return;
@@ -47,6 +75,38 @@ export const ResultDisplay: React.FC<ResultDisplayProps> = ({ generatedImage, is
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleShare = async () => {
+    if (!generatedImage || !navigator.share) {
+      alert("La condivisione non è supportata su questo browser.");
+      return;
+    }
+
+    try {
+      const blob = base64ToBlob(generatedImage);
+      if (!blob) throw new Error("Impossibile convertire l'immagine per la condivisione.");
+
+      const shareFileName = fileName.trim() ? `${fileName.trim().replace(/ /g, '_')}.png` : 'passion-portrait.png';
+      const file = new File([blob], shareFileName, { type: blob.type });
+
+      const shareData = {
+        files: [file],
+        title: 'Il mio Ritratto ImageToPassion',
+        text: 'Guarda il ritratto che ho creato con ImageToPassion!',
+      };
+
+      if (navigator.canShare && navigator.canShare(shareData)) {
+        await navigator.share(shareData);
+      } else {
+        alert("La condivisione di file non è supportata da questo browser.");
+      }
+    } catch (err) {
+      if (err instanceof Error && err.name !== 'AbortError') {
+        console.error("Errore durante la condivisione:", err);
+        alert("Si è verificato un errore durante la condivisione dell'immagine.");
+      }
+    }
   };
   
   const Placeholder = () => (
@@ -92,9 +152,11 @@ export const ResultDisplay: React.FC<ResultDisplayProps> = ({ generatedImage, is
                     <Button onClick={handleDownload} variant="secondary">
                       <DownloadIcon className="w-5 h-5" /> Scarica
                     </Button>
-                    <Button onClick={() => setQrModalOpen(true)} variant="secondary">
-                        <ShareIcon className="w-5 h-5" /> Condividi via QR
-                    </Button>
+                    {isShareApiSupported && (
+                      <Button onClick={handleShare} variant="secondary">
+                          <ShareIcon className="w-5 h-5" /> Condividi
+                      </Button>
+                    )}
                 </div>
               </>
             )}
@@ -111,7 +173,6 @@ export const ResultDisplay: React.FC<ResultDisplayProps> = ({ generatedImage, is
               </div>
             )}
           </div>
-      <QrCodeModal isOpen={isQrModalOpen} onClose={() => setQrModalOpen(false)} imageUrl={generatedImage} />
     </div>
   );
 };

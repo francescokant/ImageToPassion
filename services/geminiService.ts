@@ -1,6 +1,6 @@
 import { GoogleGenAI, Modality, GenerateContentResponse } from "@google/genai";
 import type { Keywords } from '../types';
-import { IMAGE_GENERATION_PROMPT_TEMPLATE, NEGATIVE_PROMPT, SCENARIO_GENERATION_PROMPT_TEMPLATE, CREATIVE_PASSION_PROMPT, REALISTIC_PASSION_PROMPT } from '../constants';
+import { IMAGE_GENERATION_PROMPT_TEMPLATE, SCENARIO_GENERATION_PROMPT_TEMPLATE, CREATIVE_PASSION_PROMPT, REALISTIC_PASSION_PROMPT, IMAGE_VARIATION_INSTRUCTION } from '../constants';
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
 
@@ -15,7 +15,7 @@ const fileToBase64 = (file: File): Promise<string> => {
 
 const buildImageGenerationPrompt = (scenario: string): string => {
   const prompt = IMAGE_GENERATION_PROMPT_TEMPLATE.replace('{scenario}', scenario);
-  return `${prompt}\n${NEGATIVE_PROMPT}`;
+  return prompt;
 };
 
 const generatePassion = async (prompt: string): Promise<string> => {
@@ -26,7 +26,7 @@ const generatePassion = async (prompt: string): Promise<string> => {
   try {
      const response: GenerateContentResponse = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: { parts: [{ text: prompt }] },
+      contents: prompt,
     });
     
     const text = response.text;
@@ -40,8 +40,12 @@ const generatePassion = async (prompt: string): Promise<string> => {
     if (error instanceof Error) {
       try {
         const parsedError = JSON.parse(error.message);
-        if (parsedError?.error?.code === 429) {
+        const code = parsedError?.error?.code;
+        if (code === 429) {
           throw new Error("Limite di richieste superato. L'applicazione è molto richiesta in questo momento. Per favore, riprova più tardi.");
+        }
+        if (code >= 500 && code < 600) {
+           throw new Error("Si è verificato un problema temporaneo con il servizio di generazione. Per favore, attendi un momento e riprova.");
         }
       } catch (e) {
         // Not a JSON error message, proceed with generic message
@@ -103,8 +107,12 @@ export const generateScenario = async (referenceImages: File[], keywords: Keywor
     if (error instanceof Error) {
       try {
         const parsedError = JSON.parse(error.message);
-        if (parsedError?.error?.code === 429) {
+        const code = parsedError?.error?.code;
+        if (code === 429) {
           throw new Error("Limite di richieste superato. L'applicazione è molto richiesta in questo momento. Per favore, riprova più tardi.");
+        }
+        if (code >= 500 && code < 600) {
+           throw new Error("Si è verificato un problema temporaneo con il servizio di generazione. Per favore, attendi un momento e riprova.");
         }
       } catch (e) {
         // Not a JSON error message
@@ -115,7 +123,7 @@ export const generateScenario = async (referenceImages: File[], keywords: Keywor
 };
 
 
-export const generateFinalImage = async (referenceImages: File[], scenario: string): Promise<string> => {
+export const generateFinalImage = async (referenceImages: File[], scenario: string, isVariation: boolean = false): Promise<string> => {
   if (!process.env.API_KEY) {
     throw new Error("API_KEY environment variable not set.");
   }
@@ -124,7 +132,11 @@ export const generateFinalImage = async (referenceImages: File[], scenario: stri
     throw new Error("È richiesta almeno un'immagine di riferimento.");
   }
 
-  const finalPrompt = buildImageGenerationPrompt(scenario);
+  let finalPrompt = buildImageGenerationPrompt(scenario);
+  
+  if (isVariation) {
+    finalPrompt = `${IMAGE_VARIATION_INSTRUCTION}\n\n${finalPrompt}`;
+  }
 
   const imageParts = await Promise.all(
     referenceImages.map(async (file) => {
@@ -144,7 +156,7 @@ export const generateFinalImage = async (referenceImages: File[], scenario: stri
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image-preview',
+      model: 'gemini-2.5-flash-image',
       contents: { parts },
       config: {
         responseModalities: [Modality.IMAGE, Modality.TEXT],
@@ -156,41 +168,83 @@ export const generateFinalImage = async (referenceImages: File[], scenario: stri
       console.error('Image generation blocked by API.', { reason: response.promptFeedback.blockReason, ratings: response.promptFeedback.safetyRatings });
       throw new Error(`La generazione dell'immagine è stata bloccata per motivi di sicurezza (${response.promptFeedback.blockReason}). Prova a modificare lo scenario.`);
     }
+    
+    // Check if there are any candidates at all
+    if (!response.candidates || response.candidates.length === 0) {
+        console.error('Image generation failed: No candidates in response.', { response });
+        throw new Error("Il modello non ha restituito alcun risultato. Ciò potrebbe essere dovuto a filtri di sicurezza o a un problema con il prompt.");
+    }
+    
+    const candidate = response.candidates[0];
 
-    if (response.candidates?.[0]?.finishReason === 'SAFETY') {
-      console.error('Image generation finished with reason: SAFETY.', { ratings: response.candidates[0].safetyRatings });
+    if (candidate.finishReason === 'SAFETY') {
+      console.error('Image generation finished with reason: SAFETY.', { ratings: candidate.safetyRatings });
       throw new Error("La generazione dell'immagine è stata bloccata per motivi di sicurezza. Per favore, prova a modificare lo scenario.");
     }
 
-    const imagePart = response.candidates?.[0]?.content?.parts?.find(
-      (part) => part.inlineData && part.inlineData.mimeType.startsWith('image/')
-    );
-
-    if (imagePart?.inlineData) {
-      const base64ImageBytes: string = imagePart.inlineData.data;
-      return `data:${imagePart.inlineData.mimeType};base64,${base64ImageBytes}`;
+    if (!candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
+        const reason = candidate.finishReason || 'UNKNOWN';
+        console.error('Image generation failed: Candidate has no content parts.', { reason, candidate });
+        throw new Error(`Il modello ha restituito una risposta vuota (motivo: ${reason}). Questo è spesso dovuto a filtri di sicurezza interni non specificati.`);
     }
 
-    console.error('Image generation failed: No image part in response.', { response });
-    throw new Error("Nessuna immagine è stata generata. La richiesta potrebbe essere stata bloccata o il modello non è riuscito a produrre un'immagine. Prova a modificare lo scenario.");
+    let foundImage: string | null = null;
+    let foundText: string | null = null;
+
+    for (const part of candidate.content.parts) {
+        if (part.inlineData && part.inlineData.mimeType.startsWith('image/')) {
+            const base64ImageBytes: string = part.inlineData.data;
+            foundImage = `data:${part.inlineData.mimeType};base64,${base64ImageBytes}`;
+        } else if (part.text) {
+            foundText = (foundText || '') + part.text;
+        }
+    }
+    
+    if (foundImage) {
+      return foundImage;
+    }
+
+    if (foundText) {
+      console.error('Image generation failed. Model returned text response:', foundText);
+      throw new Error(`Il modello non ha potuto generare un'immagine e ha restituito questo messaggio: "${foundText}". Prova a modificare lo scenario.`);
+    }
+
+    console.error('Image generation failed: No image or text part found in response parts.', { response });
+    throw new Error("Nessuna immagine è stata generata. La richiesta potrebbe essere stata bloccata o il modello non è riuscito a produrre un'immagine nonostante una risposta valida. Prova a modificare lo scenario.");
+
   } catch (error) {
     console.error("Gemini API call failed:", error);
+    
+    // Re-throw our custom, user-facing errors directly. This prevents them from being overwritten by the generic error below.
     if (error instanceof Error) {
-      // Re-throw our custom safety errors directly
-      if (error.message.startsWith("La generazione dell'immagine è stata bloccata")) {
-        throw error;
-      }
-      
-      // Check for rate limit error (429) by parsing the error message
+        const customErrorMessages = [
+            "bloccata per motivi di sicurezza",
+            "modello non ha potuto generare un'immagine",
+            "Nessuna immagine è stata generata",
+            "modello non ha restituito alcun risultato",
+            "risposta vuota"
+        ];
+        if (customErrorMessages.some(msg => error.message.includes(msg))) {
+            throw error;
+        }
+    }
+    
+    // Check for specific API errors (like rate limiting)
+    if (error instanceof Error) {
       try {
         const parsedError = JSON.parse(error.message);
-        if (parsedError?.error?.code === 429) {
+        const code = parsedError?.error?.code;
+        if (code === 429) {
           throw new Error("Limite di richieste superato. L'applicazione è molto richiesta in questo momento. Per favore, riprova più tardi.");
         }
+        if (code >= 500 && code < 600) {
+           throw new Error("Si è verificato un problema temporaneo con il servizio di generazione. Per favore, attendi un momento e riprova.");
+        }
       } catch (e) {
-        // Not a JSON error message, so we'll fall through to the generic error
+        // Not a JSON error message, fall through to the generic error
       }
     }
+
     // Generic fallback for all other errors
     throw new Error("Impossibile generare l'immagine. Controlla la console per maggiori dettagli.");
   }
